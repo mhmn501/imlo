@@ -38,7 +38,7 @@ Follow these steps to set up your virtual environment and install the necessary 
    
 
 ### Running the Code
-To run the project using terminal (the training part is commented out by default):
+To run the project using terminal:
 
 1. **Directory and Environment**
    - Ensure the `Image-Classifier-Neural-Network.py` and `latest_model.pth` file is present in your project directory.
