@@ -1,7 +1,8 @@
 # Import necessary modules from PyTorch
 import torchvision
 import torch
-from torchvision import transforms, datasets
+from torchvision import datasets
+import torchvision.transforms.v2 as transforms
 
 # Import necessary modules for Neural Network
 import torch.nn as nn
@@ -10,7 +11,7 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 
 # Define custom Convolution Neural Network
 class CNN(nn.Module):
-    def __init__(self, num_channels=3, num_out_ch=[4, 8, 16, 32], dropout=0.2, num_neurons=1024, num_classes=102):
+    def __init__(self, num_channels=3, num_out_ch=[32, 64, 128, 256], dropout=0.5, num_neurons=1024, num_classes=102):
         super(CNN, self).__init__()
 
         # Convolutional layers
@@ -128,15 +129,18 @@ def setup_data_transforms():
             transforms.Resize(256),
             transforms.RandomResizedCrop(224),  # Randomly crop and resize the image
             transforms.RandomHorizontalFlip(),   # Randomly flip the image horizontally
+            transforms.RandomVerticalFlip(),   # Randomly flip the image Vertically
             transforms.RandomRotation(10),       # Randomly rotate the image by up to 10 degrees
             transforms.ColorJitter(0.2, 0.2, 0.2, 0.1),  # Randomly adjust brightness, contrast, saturation
-            transforms.ToTensor(),               # Convert the image to a PyTorch tensor
+            transforms.ToImage(),
+            transforms.ToDtype(torch.float32, scale=True), #Convert the image to a PyTorch tensor
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize the image
         ]),
         'val': transforms.Compose([
-            transforms.Resize(256),              # Resize the image to 256x256
+            transforms.Resize(256),              # Resize the image to 224x224
             transforms.CenterCrop(224),          # Crop the center of the image to 224x224
-            transforms.ToTensor(),               # Convert the image to a PyTorch tensor
+            transforms.ToImage(),
+            transforms.ToDtype(torch.float32, scale=True), #Convert the image to a PyTorch tensor
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # Normalize the image
         ])
     }
@@ -156,7 +160,7 @@ def create_dataloaders(datasets, batch_size, num_workers):
     loaders = {
         'train': torch.utils.data.DataLoader(datasets['train'], batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True),
         'val': torch.utils.data.DataLoader(datasets['val'], batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True),
-        'test': torch.utils.data.DataLoader(datasets['test'], batch_size=batch_size, shuffle=False, num_workers=num_workers, pin_memory=True)
+        'test': torch.utils.data.DataLoader(datasets['test'], batch_size=batch_size, shuffle=True, num_workers=num_workers, pin_memory=True)
     }
     return loaders
 
@@ -231,7 +235,7 @@ def run_training(model, device, epochs, train_loader, valid_loader, optimizer, s
     for epoch in range(start_epoch, epochs):
         train_loss, train_acc = train_one_epoch(model, device, train_loader, optimizer, loss_fn)
         val_loss, val_acc = validate(model, device, valid_loader, loss_fn)
-        print(f'Epoch {epoch+1}/{epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
+        print(f'Epoch {epoch}/{epochs}, Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%')
         
         # Append loss history for plotting or monitoring
         train_loss_history.append(train_loss)
@@ -241,17 +245,25 @@ def run_training(model, device, epochs, train_loader, valid_loader, optimizer, s
         if val_loss < best_val_loss:
             print("Creating new checkpoint for best model...")
             best_val_loss = val_loss
-            save_checkpoint(checkpoint_path, model, optimizer, scheduler, epoch, train_loss_history, val_loss_history, best_val_loss)
+            save_checkpoint("best_trained_model.pth", model, optimizer, scheduler, epoch, train_loss_history, val_loss_history, best_val_loss)
+        elif epoch % 50 == 0:
+            # save the model for every 50 epochs
+            print("Creating new checkpoint every 50 epochs...")
+            save_checkpoint("latest_model.pth", model, optimizer, scheduler, epoch, train_loss_history, val_loss_history, best_val_loss)
         
         # Step the scheduler
         scheduler.step(val_loss)
 
+        if epoch % 10 == 0:
+            print("Current learning rate: ", scheduler.get_last_lr())
+            
     # Save the model at the end of training
-    save_checkpoint(checkpoint_path, model, optimizer, scheduler, epoch, train_loss_history, val_loss_history, best_val_loss)
+    save_checkpoint("latest_model.pth", model, optimizer, scheduler, epoch, train_loss_history, val_loss_history, best_val_loss)
     print("Train finished and the model is saved")
 
 
 def test_model(model, device, test_loader, loss_fn):
+    print("Testing model accuracy...")
     model.eval()  # Set the model to evaluation mode
     running_test_loss = 0.0
     correct = 0
@@ -273,13 +285,13 @@ def test_model(model, device, test_loader, loss_fn):
 
 def main():
     # Define hyperparameters
-    NUM_EPOCHS = 1000
-    BATCH_SIZE = 16
+    NUM_EPOCHS = 3000
+    BATCH_SIZE = 128
     NUM_WORKERS = 1
     LEARNING_RATE = 0.001
-    WEIGHT_DECAY = 0.0001
-    STEP_SIZE = 2
-    FACTOR = 0.5
+    WEIGHT_DECAY = 0.001
+    STEP_SIZE = 1000
+    FACTOR = 0.9
 
     # Setup device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -300,13 +312,14 @@ def main():
     loaders = create_dataloaders(datasets, BATCH_SIZE, NUM_WORKERS)
 
     # Check for existing checkpoint and load it if available
-    checkpoint_path = 'viking_finish_trained_model_TA60_VA49_T44.pth'
+    checkpoint_path = 'latest_model.pth'
     try:
         start_epoch, train_loss_history, val_loss_history, best_val_loss = load_checkpoint(checkpoint_path, model, optimizer, scheduler)
-        print(f'Resuming from epoch {start_epoch + 1}')
+        print(f'Resuming from epoch {start_epoch}')
         print("Best Val Loss: ", best_val_loss)
     except FileNotFoundError:
         start_epoch, train_loss_history, val_loss_history, best_val_loss = 0, [], [], float('inf')
+        print("Training the model from scratch...")
     
 
     # Train the model (comment this code if you just want to test the model)
